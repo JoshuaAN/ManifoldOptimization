@@ -2,15 +2,32 @@
 #include <tuple>
 #include <functional>
 #include <array>
+#include <set>
+#include <unordered_map>
+#include <vector>
 
 #include "Eigen/Dense"
 #include "Eigen/SparseCore"
 #include "Eigen/SparseCholesky"
+#include "Eigen/src/Core/Matrix.h"
 #include "Eigen/src/Core/util/Constants.h"
+#include "Eigen/src/SparseCore/SparseMatrix.h"
 
-struct Pose {
-  Eigen::Matrix3d R;
-  Eigen::Vector3d T;
+#include "optimization.h"
+
+using namespace optimization;
+
+struct ApriltagMeasurement {
+  /**
+   * Store corners with the data structures:
+   *
+   *   [x_1]
+   *   [y_1]
+   *   [ ⋮ ]
+   *   [y_4]
+   */
+  Eigen::Matrix<int, 8, 1> corners;
+  int tag_id;
 };
 
 /**
@@ -39,215 +56,79 @@ Eigen::VectorXd AlignVectors(std::vector<Pose> pose_set) {
   return cost;
 }
 
-double Quadratic(double A, double B, double C) {
-  double discriminant = B * B - 4 * A * C;
-  assert(discriminant >= 0);
 
-  return (-B + sqrt(discriminant)) / (2 * A);
+/**
+ * @brief Computes the reprojection of a given point in ℝ³ onto a camera with pose in SE(3).
+ *
+ * @param camera Camera pose in SE(3).
+ * @param point Point in ℝ³.
+ * @return Pixel reprojection, [x, y], of the provided point onto the camera image.
+ */
+Eigen::Vector2d ReprojectPoint(Pose camera, Eigen::Vector3d point) {
+
 }
 
-Eigen::SparseMatrix<double> SparseIdentity(int n) {
-  Eigen::SparseMatrix<double> A(n, n);
-  std::vector<Eigen::Triplet<double>> triplets;
+// /**
+//    * Return corners with the data structures:
+//    *
+//    *   [x_1]
+//    *   [y_1]
+//    *   [ ⋮ ]
+//    *   [y_4]
+//    */
+// Eigen::Matrix<int, 8, 1> ReprojectApriltag(Pose camera, Pose tag) {
+//   // return ;
+// }
 
-  for (int i = 0; i < n; ++i) {
-    triplets.emplace_back(i, i, 1);
-  }
+// std::vector<Pose> SolveTags(std::vector<std::vector<ApriltagMeasurement>> frames) {
+//   std::set<int> tag_ids;
 
-  A.setFromTriplets(triplets.begin(), triplets.end());
-  
-  return A;
-}
+//   for (auto &frame : frames) {
+//     for (auto &measurement : frame) {
+//       tag_ids.insert(measurement.tag_id);
+//     }
+//   }
 
-Eigen::SparseMatrix<double> NumericalJacobian(std::function<Eigen::VectorXd(Eigen::VectorXd)> f, 
-                                              Eigen::VectorXd x, 
-                                              double step) {
-  int rows = f(x).rows();
-  int cols = x.rows();
+//   /**
+//    * Form map of tag ids to their relative positions in the set.
+//    */
+//   std::unordered_map<int, int> tag_map;
+//   int index = 0;
+//   for (const int& element : tag_ids) {
+//       tag_map[element] = index++;
+//   }
 
-  Eigen::SparseMatrix<double> J(rows, cols);
+//   /**
+//    * Form list of measurements with the data structure: 
+//    *
+//    *   <camera pose index, tag pose index, x_corners, y_corners>
+//    */
+//   std::vector<std::tuple<int, int, Eigen::VectorXd>> measurements;
 
-  for (int col = 0; col < cols; ++col) {
-    /**
-     * Five-point stencil https://en.wikipedia.org/wiki/Five-point_stencil
-     */
-    Eigen::VectorXd h = Eigen::VectorXd::Zero(x.rows());
-    h(col) = step;
+//   for (int i = 0; i < frames.size(); ++i) {
+//     for (auto &measurement : frames.at(i)) {
+//       measurements.emplace_back(i + tag_ids.size(), tag_map[measurement.tag_id], measurement.corners);
+//     }
+//   }
 
-    Eigen::VectorXd fprime = (-f(x + 2 * h) + 8 * f(x + h) - 8 * f(x - h) + f(x + 2 * h)) / (12 * step);
-    for (int row = 0; row < rows; ++row) {
-      if (fprime(row) != 0) {
-        /**
-         * TODO: improve efficiency by building matrix with set of triplets.
-         */
-        J.coeffRef(row, col) = fprime(row);
-      }
-    }
-  }
+//   auto loss = [measurements](std::vector<Pose> poses) -> Eigen::VectorXd {
+//     // Eigen::VectorXd error{measurements.size() * 8};
 
-  return J;
-}
+//     // for (int i = 0; i < measurements.size(); ++i) {
+//     //   auto measurement = measurements.at(i);
 
-Eigen::Matrix3d SkewSymmetric(Eigen::Vector3d w) {
-  Eigen::Matrix3d w_hat;
-  w_hat << 0, -w(2), w(1), w(2), 0, -w(0), -w(1), w(0), 0;
-  return w_hat;
-}
+//     //   Pose camera_pose = poses[std::get<0>(measurement)];
+//     //   Pose tag_pose = poses[std::get<1>(measurement)];
 
-Eigen::Matrix3d SkewSymmetricExponential(Eigen::Vector3d w) {
-  /**
-   * Computes the matrix exponential of the skew symmetric matrix of w.
-   *
-   * https://math.stackexchange.com/questions/879351/matrix-exponential-of-a-skew-symmetric-matrix-without-series-expansion
-   */
-  double x = w.norm();
+//     //   Eigen::VectorXd corners = std::get<2>(measurement);
+//     //   Eigen::VectorXd corner_reprojection = ReprojectApriltag(camera_pose, tag_pose);
 
-  if (x == 0) {
-    return Eigen::Matrix3d::Identity();
-  }
+//     //   error.segment(i * 8, 8) = corners - corner_reprojection;
+//     // }
+//   };
 
-  Eigen::Matrix3d C = SkewSymmetric(w);
-
-  return Eigen::Matrix3d::Identity() + sin(x) / x * C + (1 - cos(x)) / (x * x) * C * C;
-}
- 
- /**
-  * @brief Finds a set of poses of size n such that the provided cost function is minimized.
-  *
-  *   https://www.seas.upenn.edu/~cjtaylor/PUBLICATIONS/pdfs/TaylorTR94b.pdf
-  *
-  * @param cost Cost function mapping a set of poses to a cost vector.
-  * @param n Size of pose set that must be passed to the cost function.
-  */
-std::vector<Pose> Optimize(std::function<Eigen::VectorXd(std::vector<Pose>)> cost, size_t n) {
-  /**
-   * Trust region step acceptance parameter η
-   */
-  double eta = 0.1;
-
-  /**
-   * Trust region size Δ
-   */
-  double delta = 1;
-
-  /**
-   * Pose set with elements in SE(3) which we will form the local approximation around.
-   */
-  std::vector<Pose> S0(n);
-
-  for (int i = 0; i < n; ++i) {
-    Eigen::Matrix3d R0;
-    Eigen::Vector3d T0;
-    R0 << 1, 0, 0, 0, 1, 0, 0, 0, 1;
-    T0 << 0, 0, 0;
-    S0[i] = Pose{R0, T0};
-  }
-
-  while (cost(S0).lpNorm<Eigen::Infinity>() > 1e-9) {
-    /**
-     * Form a local paramterization mapping ℝ6 to SE(3) around S₀
-     */
-    auto parameterization = [n, S0](Eigen::VectorXd x) -> std::vector<Pose> {
-      std::vector<Pose> S(n);
-
-      for (int i = 0; i < n; ++i) {
-        Eigen::Vector3d w = x.segment(i * 6, 3);
-        Eigen::Vector3d t = x.segment(i * 6 + 3, 3);
-
-        S[i] = Pose{S0[i].R * SkewSymmetricExponential(w), S0[i].T + t};
-      }
-
-      return S;
-    };
-
-    /**
-     * Function composition of cost function and paramterization.
-     */
-    auto cost_parameterization = [parameterization, cost](Eigen::VectorXd x) -> Eigen::VectorXd {
-      return cost(parameterization(x));
-    };
-
-    /**
-     * Local paramterization is centered around x = 0 ∈ ℝ⁶
-     */
-    Eigen::VectorXd x = Eigen::VectorXd::Zero(n * 6);
-
-    Eigen::SparseMatrix<double> J = NumericalJacobian(cost_parameterization, 
-                                                      x, 
-                                                      1e-6);
-
-    /**
-     * Guass-Newton approximates the Hessian and gradient with:
-     *
-     *   H = Jᵀ(x)J(x)
-     *   g = Jᵀ(x)f(x)
-     */
-    Eigen::SparseMatrix<double> H = J.transpose() * J;
-    Eigen::VectorXd g = J.transpose() * cost_parameterization(x);
-
-    
-    Eigen::SimplicialLLT<Eigen::SparseMatrix<double>> solver{H};
-
-    /**
-     * If LLᵀ factorization failed, regularize matrix and try again until success.
-     */
-    double beta = 1e-3;
-    while (solver.info() != Eigen::Success) {
-      solver.compute(J.transpose() * J + SparseIdentity(J.rows()) * beta);
-      beta *= 10;
-    }
-
-    /**
-     * Newton's method:
-     *
-     *  Δx = −H⁻¹g
-     */
-    Eigen::VectorXd p_b = solver.solve(-g);
-
-    /**
-     * Dogleg trust region method to ensure convergence.
-     */
-    Eigen::VectorXd p_u = -g.dot(g) / (g.dot(H * g)) * g;
-
-    Eigen::VectorXd p;
-
-    bool step_limit = false; // If step lies on the edge of the trust region.
-
-    if (p_b.norm() <= delta) {
-      p = p_b;
-    } else if (p_u.norm() >= delta) {
-      step_limit = true;
-      p = p_u / p_u.norm() * delta;
-    } else {
-      step_limit = true;
-      double tau = Quadratic((p_b - p_u).squaredNorm(), 
-                              2 * (p_b - p_u).dot(p_u), 
-                              p_u.squaredNorm() - delta * delta);
-      p = (p_b - p_u) * tau + p_u;
-    }
-
-    double actual_reduction = cost_parameterization(p).norm() - cost_parameterization(x).norm();
-    double pred_reduction = (J * p + cost_parameterization(x)).norm() - (cost_parameterization(x)).norm();
-    double rho = actual_reduction / pred_reduction;
-
-    if (rho < 0.25) {
-      delta *= 0.25;
-    } else {
-      if (rho > 0.75 && step_limit) {
-        delta *= 2;
-      }
-    }
-
-    if (rho > eta) {
-      /**
-      * Update S0 from step
-      */
-      S0 = parameterization(p);
-    }
-  }
-
-  return S0;
-}
+//   return Optimize(loss, tag_ids.size() + frames.size());
+// }
  
 int main() {
   int N = 5;

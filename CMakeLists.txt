@@ -24,7 +24,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(eigen)
 
 # Add your executable or library
-add_executable(main main.cpp)
+add_executable(main main.cpp optimization.cpp)
 
 # Link Eigen to your target
 target_link_libraries(main PRIVATE Eigen3::Eigen)
