@@ -37,6 +37,13 @@ Eigen::VectorXd AlignVectors(Pose S) {
   return cost;
 }
 
+double Quadratic(double A, double B, double C) {
+  double discriminant = B * B - 4 * A * C;
+  assert(discriminant >= 0);
+
+  return (-B + sqrt(discriminant)) / (2 * A);
+}
+
 Eigen::SparseMatrix<double> SparseIdentity(int n) {
   Eigen::SparseMatrix<double> A(n, n);
   std::vector<Eigen::Triplet<double>> triplets;
@@ -193,9 +200,15 @@ Pose Optimize(std::function<Eigen::VectorXd(Pose)> cost) {
       p = p_u / p_u.norm() * delta;
     } else {
       step_limit = true;
+      double tau = Quadratic((p_b - p_u).squaredNorm(), 
+                              2 * (p_b - p_u).dot(p_u), 
+                              p_u.squaredNorm() - delta * delta);
+      p = (p_b - p_u) * tau + p_u;
     }
 
-    double rho = ;
+    double actual_reduction = cost_parameterization(p).norm() - cost_parameterization(x).norm();
+    double pred_reduction = (J * p + cost_parameterization(x)).norm() - (cost_parameterization(x)).norm();
+    double rho = actual_reduction / pred_reduction;
 
     if (rho < 0.25) {
       delta *= 0.25;
