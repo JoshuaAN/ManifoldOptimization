@@ -1,38 +1,40 @@
 #include <iostream>
 #include <tuple>
 #include <functional>
+#include <array>
 
 #include "Eigen/Dense"
 #include "Eigen/SparseCore"
 #include "Eigen/SparseCholesky"
+#include "Eigen/src/Core/util/Constants.h"
 
 struct Pose {
   Eigen::Matrix3d R;
   Eigen::Vector3d T;
 };
 
-Eigen::VectorXd AlignVectors(Pose S) {
-  Eigen::Vector3d u1;
-  u1 << 0, 1, 0;
-  Eigen::Vector3d v1;
-  v1 << 1, 0, 0;
+/**
+ * Test case attempting to align two vectors for each provided pose.
+ */
+Eigen::VectorXd AlignVectors(std::vector<Pose> pose_set) {
+  Eigen::VectorXd cost(pose_set.size() * 6);
 
-  Eigen::Vector3d u2;
-  u2 << 1, 0, 0;
-  Eigen::Vector3d v2;
-  v2 << 0, -1, 0;
+  for (int i = 0; i < pose_set.size(); ++i) {
+    Pose S = pose_set[i];
 
-  Eigen::VectorXd cost(6);
+    Eigen::Vector3d u1;
+    u1 << 0, 1, 0;
+    Eigen::Vector3d v1;
+    v1 << 1, 0, 0;
 
-  Eigen::VectorXd cost1 = S.R * v1 - u1 + S.T;
-  Eigen::VectorXd cost2 = S.R * v2 - u2 + S.T;
+    Eigen::Vector3d u2;
+    u2 << 1, 0, 0;
+    Eigen::Vector3d v2;
+    v2 << 0, -1, 0;
 
-  cost(0) = cost1(0);
-  cost(1) = cost1(1);
-  cost(2) = cost1(2);
-  cost(3) = cost2(0);
-  cost(4) = cost2(1);
-  cost(5) = cost2(2);
+    cost.segment(i * 6, 3) = S.R * v1 - u1 + S.T;
+    cost.segment(i * 6 + 3, 3) = S.R * v2 - u2 + S.T;
+  }
 
   return cost;
 }
@@ -74,12 +76,12 @@ Eigen::SparseMatrix<double> NumericalJacobian(std::function<Eigen::VectorXd(Eige
 
     Eigen::VectorXd fprime = (-f(x + 2 * h) + 8 * f(x + h) - 8 * f(x - h) + f(x + 2 * h)) / (12 * step);
     for (int row = 0; row < rows; ++row) {
-      // if (fprime(row) != 0) {
+      if (fprime(row) != 0) {
         /**
          * TODO: improve efficiency by building matrix with set of triplets.
          */
         J.coeffRef(row, col) = fprime(row);
-      // }
+      }
     }
   }
 
@@ -109,7 +111,15 @@ Eigen::Matrix3d SkewSymmetricExponential(Eigen::Vector3d w) {
   return Eigen::Matrix3d::Identity() + sin(x) / x * C + (1 - cos(x)) / (x * x) * C * C;
 }
  
-Pose Optimize(std::function<Eigen::VectorXd(Pose)> cost) {
+ /**
+  * @brief Finds a set of poses of size n such that the provided cost function is minimized.
+  *
+  *   https://www.seas.upenn.edu/~cjtaylor/PUBLICATIONS/pdfs/TaylorTR94b.pdf
+  *
+  * @param cost Cost function mapping a set of poses to a cost vector.
+  * @param n Size of pose set that must be passed to the cost function.
+  */
+std::vector<Pose> Optimize(std::function<Eigen::VectorXd(std::vector<Pose>)> cost, size_t n) {
   /**
    * Trust region step acceptance parameter η
    */
@@ -121,36 +131,46 @@ Pose Optimize(std::function<Eigen::VectorXd(Pose)> cost) {
   double delta = 1;
 
   /**
-   * Pose in SE(3) which we will form the local approximation around.
+   * Pose set with elements in SE(3) which we will form the local approximation around.
    */
-  Eigen::Matrix3d R0;
-  Eigen::Vector3d T0;
-  R0 << 1, 0, 0, 0, 1, 0, 0, 0, 1;
-  T0 << 0, 0, 0;
-  Pose S0 = Pose{R0, T0};
+  std::vector<Pose> S0(n);
 
-  while (cost(S0).norm() > 1e-6) {
+  for (int i = 0; i < n; ++i) {
+    Eigen::Matrix3d R0;
+    Eigen::Vector3d T0;
+    R0 << 1, 0, 0, 0, 1, 0, 0, 0, 1;
+    T0 << 0, 0, 0;
+    S0[i] = Pose{R0, T0};
+  }
+
+  while (cost(S0).lpNorm<Eigen::Infinity>() > 1e-9) {
     /**
      * Form a local paramterization mapping ℝ6 to SE(3) around S₀
      */
-    auto parameterization = [S0](Eigen::Matrix<double, 6, 1> x) -> Pose {
-      Eigen::Vector3d w = x.head(3);
-      Eigen::Vector3d t = x.tail(3);
+    auto parameterization = [n, S0](Eigen::VectorXd x) -> std::vector<Pose> {
+      std::vector<Pose> S(n);
 
-      return Pose{S0.R * SkewSymmetricExponential(w), S0.T + t};
+      for (int i = 0; i < n; ++i) {
+        Eigen::Vector3d w = x.segment(i * 6, 3);
+        Eigen::Vector3d t = x.segment(i * 6 + 3, 3);
+
+        S[i] = Pose{S0[i].R * SkewSymmetricExponential(w), S0[i].T + t};
+      }
+
+      return S;
     };
 
     /**
      * Function composition of cost function and paramterization.
      */
-    auto cost_parameterization = [parameterization, cost](Eigen::Matrix<double, 6, 1> x) -> Eigen::VectorXd {
+    auto cost_parameterization = [parameterization, cost](Eigen::VectorXd x) -> Eigen::VectorXd {
       return cost(parameterization(x));
     };
 
     /**
-     * Local paramterization is centered around x = 0 ∈ ⁶ℝ
+     * Local paramterization is centered around x = 0 ∈ ℝ⁶
      */
-    Eigen::VectorXd x = Eigen::Matrix<double, 6, 1>::Zero();
+    Eigen::VectorXd x = Eigen::VectorXd::Zero(n * 6);
 
     Eigen::SparseMatrix<double> J = NumericalJacobian(cost_parameterization, 
                                                       x, 
@@ -230,13 +250,17 @@ Pose Optimize(std::function<Eigen::VectorXd(Pose)> cost) {
 }
  
 int main() {
-  Pose S = Optimize(AlignVectors);
+  int N = 5;
 
-  std::cout << S.R << std::endl;
-  std::cout << S.T << std::endl;
+  std::vector<Pose> S = Optimize(AlignVectors, N);
+
+  // std::cout << S.R << std::endl;
 
   // Print the Euler angles
-  std::cout << "Euler angles (ZYX order):\n" << S.R.eulerAngles(2, 1, 0) << std::endl;
+  for (int i = 0; i < 5; ++i) {
+    std::cout << "Euler angles (ZYX order):\n" << S[i].R.eulerAngles(2, 1, 0) << std::endl;
+    std::cout << "Translation:\n" << S[i].T << std::endl;
+  }
 
   return 0;
 }
