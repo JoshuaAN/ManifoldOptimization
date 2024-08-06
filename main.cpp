@@ -17,19 +17,6 @@
 
 using namespace optimization;
 
-struct ApriltagMeasurement {
-  /**
-   * Store corners with the data structures:
-   *
-   *   [x_1]
-   *   [y_1]
-   *   [ ⋮ ]
-   *   [y_4]
-   */
-  Eigen::Matrix<int, 8, 1> corners;
-  int tag_id;
-};
-
 /**
  * Test case attempting to align two vectors for each provided pose.
  */
@@ -56,16 +43,57 @@ Eigen::VectorXd AlignVectors(std::vector<Pose> pose_set) {
   return cost;
 }
 
+struct ApriltagMeasurement {
+  /**
+   * Store corners with the data structures:
+   *
+   *   [x_1]
+   *   [y_1]
+   *   [ ⋮ ]
+   *   [y_4]
+   */
+  Eigen::Matrix<int, 8, 1> corners;
+  int tag_id;
+};
 
 /**
  * @brief Computes the reprojection of a given point in ℝ³ onto a camera with pose in SE(3).
  *
+ * @param K Camera instrinic matrix.
  * @param camera Camera pose in SE(3).
  * @param point Point in ℝ³.
- * @return Pixel reprojection, [x, y], of the provided point onto the camera image.
+ * @return Pixel reprojection, [x, y]ᵀ, of the provided point onto the camera image.
  */
-Eigen::Vector2d ReprojectPoint(Pose camera, Eigen::Vector3d point) {
+Eigen::Vector2d ReprojectPoint(const Eigen::Matrix3d& K, 
+                               const Pose& camera, 
+                               const Eigen::Vector3d& point) {
+    /**
+     * Pinhole camera model:
+     *
+     *   s * p_c = K[R | T]p_w
+     *
+     * Where:
+     *
+     *   - p_w = [x  y  z  1]ᵀ is the homogenous world point.
+     *   - p_c = [u  v  1]ᵀ is the corresponding homogenous image point.
+     *   - K is the matrix of intrinsic camera paramters.
+     *   - s is a scale factor for the image point.
+     *   - R and T are the 3D rotation and 3D translation of the camera. 
+     *
+     * Taken directly from https://en.wikipedia.org/wiki/Perspective-n-Point.
+     */
+  Eigen::Matrix<double, 3, 4> transform;
+  transform.leftCols(3) = camera.R;
+  transform.rightCols(1) = camera.T;
 
+  Eigen::Matrix<double, 4, 1> world_point;
+  world_point.segment(0, 3) = point;
+  world_point(3, 0) = 1;
+
+  Eigen::Vector3d temp = K * transform * world_point;
+  Eigen::Vector3d p_c = temp / temp(2);
+
+  return p_c.segment(0, 2);
 }
 
 // /**
