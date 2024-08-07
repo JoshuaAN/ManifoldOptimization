@@ -5,6 +5,7 @@
 #include <set>
 #include <unordered_map>
 #include <vector>
+#include <fstream>
 
 #include "Eigen/Dense"
 #include "Eigen/SparseCore"
@@ -13,9 +14,12 @@
 #include "Eigen/src/Core/util/Constants.h"
 #include "Eigen/src/SparseCore/SparseMatrix.h"
 
+#include "json.hpp"
+
 #include "optimization.h"
 
 using namespace optimization;
+using json = nlohmann::json;
 
 /**
  * Test case attempting to align two vectors for each provided pose.
@@ -23,7 +27,7 @@ using namespace optimization;
 Eigen::VectorXd AlignVectors(std::vector<Pose> pose_set) {
   Eigen::VectorXd cost(pose_set.size() * 6);
 
-  for (int i = 0; i < pose_set.size(); ++i) {
+  for (size_t i = 0; i < pose_set.size(); ++i) {
     Pose S = pose_set[i];
 
     Eigen::Vector3d u1;
@@ -52,7 +56,7 @@ struct ApriltagMeasurement {
    *   [ ⋮ ]
    *   [y_4]
    */
-  Eigen::Matrix<int, 8, 1> corners;
+  Eigen::Matrix<double, 8, 1> corners;
   int tag_id;
 };
 
@@ -86,12 +90,19 @@ Eigen::Vector2d ReprojectPoint(const Eigen::Matrix3d& K,
   transform.leftCols(3) = camera.R;
   transform.rightCols(1) = camera.T;
 
+  // std::cout << "Transform\n" << transform << std::endl;
+
   Eigen::Matrix<double, 4, 1> world_point;
   world_point.segment(0, 3) = point;
   world_point(3, 0) = 1;
 
+  // std::cout << "world point\n" << world_point << std::endl;
+
   Eigen::Vector3d temp = K * transform * world_point;
+  // std::cout << "temp\n" << temp << std::endl;
   Eigen::Vector3d p_c = temp / temp(2);
+
+  // std::cout << "p_c\n" << p_c << std::endl;
 
   return p_c.segment(0, 2);
 }
@@ -157,19 +168,220 @@ Eigen::Vector2d ReprojectPoint(const Eigen::Matrix3d& K,
 
 //   return Optimize(loss, tag_ids.size() + frames.size());
 // }
+
+// struct Point {
+//   double x;
+//   double y;
+// };
+
+// struct Shape {
+//     int id;
+//     std::vector<Point> corners;
+// };
+
+// void from_json(const json& j, Point& p) {
+//     j.at("x").get_to(p.x);
+//     j.at("y").get_to(p.y);
+// }
+
+// void from_json(const json& j, Shape& s) {
+//     j.at("id").get_to(s.id);
+//     j.at("corners").get_to(s.corners);
+// }
+
  
+// int main() {
+//   // Eigen::Matrix<double, 3, 3> K;
+//   // K <<  5.9938E+02,  0.0000E+00,  4.7950E+02,
+//   //       0.0000E+00,  5.9917E+02,  3.5950E+02,
+//   //       0.0000E+00,  0.0000E+00,  1.0000E+00;
+
+//   // // int N = 5;
+
+//   // // std::vector<Pose> S = Optimize(AlignVectors, N);
+
+//   // // // std::cout << S.R << std::endl;
+
+//   // // // Print the Euler angles
+//   // // for (int i = 0; i < 5; ++i) {
+//   // //   std::cout << "Euler angles (ZYX order):\n" << S[i].R.eulerAngles(2, 1, 0) << std::endl;
+//   // //   std::cout << "Translation:\n" << S[i].T << std::endl;
+//   // // }
+
+//   // auto vec = [](double x, double y, double z) {
+//   //   Eigen::Vector3d evec;
+//   //   evec << x, y, z;
+//   //   return evec;
+//   // };
+
+//   // Eigen::Vector3d axis_angle(1.0, 0.0, 0.0); // Example vector, axis = (1,0,0), angle = 1 radian
+//   // double angle = axis_angle.norm(); // The magnitude of the vector
+//   // Eigen::Vector3d axis = axis_angle.normalized(); // The direction of the vector
+
+//   // Eigen::AngleAxisd angleAxis(angle, axis);
+
+//   // Eigen::Vector3d T;
+//   // T << 1, 5, 3;
+
+//   // Pose ref_camera = Pose{angleAxis.toRotationMatrix(), T};
+
+//   // std::vector<Eigen::Vector3d> points;
+//   // points.push_back(vec(5, 3, 2));
+//   // points.push_back(vec(1, 4, 9));
+//   // points.push_back(vec(5, 9, 2));
+//   // points.push_back(vec(-4, 1, 2));
+
+//   // auto loss = [ref_camera, points, K](std::vector<Pose> poses) -> Eigen::VectorXd {
+//   //   Eigen::VectorXd ref_pixels(points.size() * 2);
+//   //   Eigen::VectorXd measure_pixels(points.size() * 2);
+
+//   //   Pose S = poses.at(0);
+
+//   //   for (size_t i = 0; i < points.size(); ++i) {
+//   //     ref_pixels.segment(i * 2, 2) = ReprojectPoint(K, ref_camera, points.at(i));
+//   //     measure_pixels.segment(i * 2, 2) = ReprojectPoint(K, S, points.at(i));
+//   //   }
+
+//   //   return ref_pixels - measure_pixels;
+//   // };
+
+//   // Pose S = Optimize(loss, 1).at(0);
+
+//   // std::cout << "Translation:\n" << S.T << std::endl;
+//   // // std::cout << "Rotation:\n" << S.R.eu << std::endl;
+
+//   return 0;
+// }
+
 int main() {
-  int N = 5;
+  std::vector<std::vector<ApriltagMeasurement>> frames;
+  std::ifstream file("field_tags_2024.jsonl");
 
-  std::vector<Pose> S = Optimize(AlignVectors, N);
-
-  // std::cout << S.R << std::endl;
-
-  // Print the Euler angles
-  for (int i = 0; i < 5; ++i) {
-    std::cout << "Euler angles (ZYX order):\n" << S[i].R.eulerAngles(2, 1, 0) << std::endl;
-    std::cout << "Translation:\n" << S[i].T << std::endl;
+  if (!file.is_open()) {
+      throw std::runtime_error("Unable to open file");
   }
+
+  std::string line;
+  while (std::getline(file, line)) {
+    json j = json::parse(line);
+
+    std::vector<ApriltagMeasurement> measurements;
+
+    for (const auto& item : j) {
+        ApriltagMeasurement measurement;
+        measurement.tag_id = item["id"].get<int>();
+        measurement.corners = Eigen::Matrix<double, 8, 1>();
+
+        int index = 0;
+        for (const auto& corner : item["corners"]) {
+          measurement.corners(2 * index) = corner["x"].get<double>();
+          measurement.corners(2 * index + 1) = corner["y"].get<double>();
+          index += 1;
+        }
+        measurements.push_back(measurement);
+    }
+    frames.push_back(measurements);
+  }
+
+  file.close();
+
+  // // Print parsed data
+  // for (const auto& frame : frames) {
+  //   std::cout << "Frame" << std::endl;
+  //   for (const auto& measurement : frame) {
+  //     std::cout << "Object ID: " << measurement.tag_id << std::endl;
+  //     std::cout << "Corners:\n" << measurement.corners << std::endl;
+  //   }
+  // }
+
+  // Object ID: 16
+  // Corners:
+  // 835.869
+  // 265.512
+  // 849.627
+  // 262.44
+  // 849.588
+  // 241.223
+  // 836.485
+  // 244.896
+  // Object ID: 6
+  // Corners:
+  // 798.166
+  // 310.764
+  // 808.583
+  // 310.438
+  // 808.774
+  // 299.035
+  // 798.521
+  // 300.587
+
+    auto vec = [](double x, double y, double z) {
+    Eigen::Vector3d evec;
+    evec << x, y, z;
+    return evec;
+  };
+
+  Eigen::Matrix<double, 3, 3> K;
+  K <<  5.9938E+02,  0.0000E+00,  4.7950E+02,
+        0.0000E+00,  5.9917E+02,  3.5950E+02,
+        0.0000E+00,  0.0000E+00,  1.0000E+00;
+
+  ApriltagMeasurement tag_6;
+  tag_6.tag_id = 6;
+  tag_6.corners = Eigen::Matrix<double, 8, 1>();
+  tag_6.corners << 798.166,
+                    310.764,
+                    808.583,
+                    310.438,
+                    808.774,
+                    299.035,
+                    798.521,
+                    300.587;
+  
+  Pose tag_6_pose;
+  tag_6_pose.T = Eigen::Vector3d();
+  tag_6_pose.T << 1.8415, 8.2042, 1.355852;
+  Eigen::Quaternion<double> Q;
+  Q.coeffs() << -0.7071067811865475, 0, 0, 0.7071067811865475;
+  tag_6_pose.R = Q.toRotationMatrix();
+
+  std::cout << "R:\n" << tag_6_pose.R << std::endl;
+
+  auto ReprojectApriltag = [vec, K](const Pose& camera, const Pose& tag) -> Eigen::Matrix<double, 8, 1> {
+    std::array<Eigen::Vector3d, 4> corners{tag.R * vec(0, -6.5 / 2, -6.5 / 2) + tag.T, 
+                                           tag.R * vec(0, 6.5 / 2, -6.5 / 2) + tag.T,
+                                           tag.R * vec(0, 6.5 / 2, 6.5 / 2) + tag.T,
+                                           tag.R * vec(0, -6.5 / 2, 6.5 / 2) + tag.T};
+    
+    Eigen::Matrix<double, 8, 1> pixels;
+    
+    for (size_t i = 0; i < 4; ++i) {
+      // std::cout << "cam:\n" << camera.R << std::endl;
+      // std::cout << "corn:\n" << corners.at(i) << std::endl;
+      pixels.segment(2 * i, 2) = ReprojectPoint(K, camera, corners.at(i));
+      // std::cout << "pixel:\n" << pixels.segment(2 * i, 2) << std::endl;
+    }
+
+    return pixels;
+  };
+
+  auto loss = [tag_6_pose, tag_6, ReprojectApriltag](std::vector<Pose> poses) {
+    auto S = poses[0];
+
+    std::cout << "Cost: \n" << ReprojectApriltag(S, tag_6_pose) - tag_6.corners << std::endl;
+
+    return ReprojectApriltag(S, tag_6_pose) - tag_6.corners;
+  };
+
+  // Eigen::Vector3d zv = Eigen::Vector3d::Zero();
+  // Eigen::Matrix3d zr = Eigen::Matrix3d::Identity();
+  // Pose c = Pose{zr, zv};
+
+  // std::cout << "Reprojection:\n" << ReprojectApriltag(c, tag_6_pose);
+
+  Pose S = Optimize(loss, 1)[0];
+
+  std::cout << "Translation:\n" << S.T << std::endl;
 
   return 0;
 }

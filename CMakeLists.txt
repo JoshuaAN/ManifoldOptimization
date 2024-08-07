@@ -7,6 +7,9 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
+# Add your executable or library
+add_executable(main main.cpp optimization.cpp)
+
 # Enable the generation of compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -23,8 +26,10 @@ FetchContent_Declare(
 # Make the Eigen content available
 FetchContent_MakeAvailable(eigen)
 
-# Add your executable or library
-add_executable(main main.cpp optimization.cpp)
-
-# Link Eigen to your target
+# Link Eigen to target
 target_link_libraries(main PRIVATE Eigen3::Eigen)
+
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz)
+FetchContent_MakeAvailable(json)
+
+target_link_libraries(main PRIVATE nlohmann_json::nlohmann_json)

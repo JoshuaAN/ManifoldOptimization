@@ -86,10 +86,8 @@ std::vector<Pose> Optimize(std::function<Eigen::VectorXd(std::vector<Pose>)> cos
   std::vector<Pose> S0(n);
 
   for (int i = 0; i < n; ++i) {
-    Eigen::Matrix3d R0;
-    Eigen::Vector3d T0;
-    R0 << 1, 0, 0, 0, 1, 0, 0, 0, 1;
-    T0 << 0, 0, 0;
+    Eigen::Matrix3d R0 = Eigen::Matrix3d::Identity();
+    Eigen::Vector3d T0 = Eigen::Vector3d::Zero();
     S0[i] = Pose{R0, T0};
   }
 
@@ -114,6 +112,8 @@ std::vector<Pose> Optimize(std::function<Eigen::VectorXd(std::vector<Pose>)> cos
      * Function composition of cost function and paramterization.
      */
     auto cost_parameterization = [parameterization, cost](Eigen::VectorXd x) -> Eigen::VectorXd {
+      std::cout << "Parameterization R\n" << parameterization(x)[0].R << std::endl;
+      std::cout << "Parameterization T\n" << parameterization(x)[0].T << std::endl;
       return cost(parameterization(x));
     };
 
@@ -135,10 +135,13 @@ std::vector<Pose> Optimize(std::function<Eigen::VectorXd(std::vector<Pose>)> cos
     Eigen::SparseMatrix<double> H = J.transpose() * J;
     Eigen::VectorXd g = J.transpose() * cost_parameterization(x);
 
+    std::cout << "c\n" << cost_parameterization(x) << std::endl;
+    std::cout << "g norm: " << g.lpNorm<Eigen::Infinity>() << std::endl;
+
     /**
      * Termination condition of the solver.
      */
-    if (g.lpNorm<Eigen::Infinity>() < 1e-9) {
+    if (g.lpNorm<Eigen::Infinity>() < 1e-3 || std::isnan(g.lpNorm<Eigen::Infinity>())) {
       break;
     }
     
