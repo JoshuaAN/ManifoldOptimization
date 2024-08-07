@@ -366,11 +366,13 @@ int main() {
   };
 
   auto loss = [tag_6_pose, tag_6, ReprojectApriltag](std::vector<Pose> poses) {
-    auto S = poses[0];
+    Pose S = poses[0];
 
-    std::cout << "Cost: \n" << ReprojectApriltag(S, tag_6_pose) - tag_6.corners << std::endl;
+    Eigen::VectorXd result = ReprojectApriltag(S, tag_6_pose) - tag_6.corners;
 
-    return ReprojectApriltag(S, tag_6_pose) - tag_6.corners;
+    // std::cout << "Cost: \n" << result << std::endl;
+
+    return result;
   };
 
   // Eigen::Vector3d zv = Eigen::Vector3d::Zero();
